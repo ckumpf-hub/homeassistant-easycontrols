@@ -43,6 +43,39 @@ The integration adds the following entities and services to Home Assistant:
   - settings speed
   - setting preset (auto, party, stand-by mode)
 
+- **Automatic fan regulation**
+
+  The `Fan regulator stage 2` switch enables a humidity- and temperature-based
+  controller for fan stage 2. It reads extract-air humidity, the current stage 2
+  supply-air voltage, and supply-, outdoor-, and extract-air temperatures. A new
+  target is calculated at most once per minute and the current target is written
+  to the unit every 15 seconds. The controller sets the device to manual mode
+  and fan stage 2 while it is active.
+
+  The measured extract-air humidity is multiplied by the configurable humidity
+  correction factor before it is used. The adaptive humidity target starts at
+  the configured start value (52% by default) and is smoothed toward the
+  previous corrected reading with a 1/30 weighting per calculation. The
+  difference between corrected humidity and this target is combined with the
+  current supply-air voltage to calculate the extract-air fan voltage:
+
+  ```text
+  humidity error = corrected humidity - adaptive humidity target
+  extract-air voltage = sqrt(5.9 * abs(current supply-air voltage / 1.2
+                                      + 0.2 * humidity error))
+  supply-air target = extract-air voltage * 1.2
+  ```
+
+  The result is adjusted for supply-air temperature: it is reduced above 25.5°C
+  and again above 26.5°C, with a 3 V minimum after these reductions. Above 27°C
+  the extract-air voltage is set to 0 V, overriding both the minimum and the
+  warm-weather override. Otherwise, in warm-weather conditions
+  (outdoor air above 12°C, cooler than extract air, and extract air above
+  24.4°C), the extract-air voltage is kept at or above 6.3 V. The final supply-
+  air target is limited to 0–10 V. When regulation is switched off, the
+  controller stops updating and sets a fixed extract-air voltage of 5.9 V
+  (7.1 V supply-air target) on stage 2.
+
 - **Sensors**
   - Pre-heater and after-heater related sensors:
     - Preheater operation hours
