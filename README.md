@@ -56,6 +56,8 @@ The integration adds the following entities and services to Home Assistant:
     - Outgoing air temperature
   - Humidity sensors:
     - Extract air relative humidity
+    - Corrected extract air relative humidity
+    - Adaptive humidity target
   - External sensors:
     - FTF Humidity
     - FTF Temperature
@@ -78,6 +80,13 @@ The integration adds the following entities and services to Home Assistant:
   - Additional computed sensors which values are not provided by the ventilation unit:
     - Airflow rate (approximately value)
     - Heat recovery efficiency (based on: https://www.engineeringtoolbox.com/heat-recovery-efficiency-d_201.html)
+- **Humidity settings**
+
+  The humidity correction factor defaults to `1.000` and is applied to the measured
+  extract-air humidity for both the corrected sensor and the fan regulator. The raw
+  sensor remains unchanged. The adaptive humidity start value defaults to `52%`; it
+  initializes the adaptive target, which subsequently follows the corrected readings.
+  Changing either setting resets the adaptive target to the configured start value.
 - **Services**
   - `easycontrols.party_mode`
 
