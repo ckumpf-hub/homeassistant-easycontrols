@@ -23,6 +23,7 @@ from homeassistant.util.percentage import (
 
 from custom_components.easycontrols import get_coordinator
 from custom_components.easycontrols.const import (
+    DATA_FAN_REGULATOR,
     DOMAIN,
     OPERATING_MODE_AUTO,
     OPERATING_MODE_MANUAL,
@@ -47,6 +48,7 @@ from custom_components.easycontrols.const import (
     VARIABLE_SUPPLY_AIR_RPM,
 )
 from custom_components.easycontrols.coordinator import EasyControlsDataUpdateCoordinator
+from custom_components.easycontrols.fan_regulator import FanRegulatorController
 from custom_components.easycontrols.modbus_variable import ModbusVariable
 
 SPEED_BASIC_VENTILATION = "basic"
@@ -67,10 +69,15 @@ _LOGGER = logging.getLogger(__name__)
 class EasyControlsFanDevice(FanEntity):
     """Represents a fan entity which controls the Helios device."""
 
-    def __init__(self: Self, coordinator: EasyControlsDataUpdateCoordinator):
+    def __init__(
+        self: Self,
+        coordinator: EasyControlsDataUpdateCoordinator,
+        regulator: FanRegulatorController,
+    ):
         """Initialize a new instance of `EasyControlsFanDevice` class."""
         self.entity_description = FanEntityDescription(key="fan", name=coordinator.device_name)
         self._coordinator = coordinator
+        self._regulator = regulator
         self._speed: str | None = None
         self._fan_stage: int | None = None
         self._operating_mode: int | None = None
@@ -198,6 +205,9 @@ class EasyControlsFanDevice(FanEntity):
             percentage: The speed percentage.
 
         """
+        if self._regulator.enabled:
+            return
+
         if percentage == 0:
             await self.async_turn_off()
         else:
@@ -218,7 +228,10 @@ class EasyControlsFanDevice(FanEntity):
             preset_mode: The preset mode to set.
 
         """
-        self._disable_running_preset()
+        if self._regulator.enabled:
+            return
+
+        await self._disable_running_preset()
 
         if preset_mode == PRESET_AUTO:
             await self._coordinator.set_variable(VARIABLE_OPERATING_MODE, OPERATING_MODE_AUTO)
@@ -238,6 +251,9 @@ class EasyControlsFanDevice(FanEntity):
         **kwargs,  # noqa: ARG002
     ) -> None:
         """Turns on the fan at the specific speed or sets the specified preset mode."""
+        if self._regulator.enabled:
+            return
+
         if percentage is None and preset_mode is None:
             percentage = 50
 
@@ -255,6 +271,9 @@ class EasyControlsFanDevice(FanEntity):
 
     async def async_turn_off(self: Self, **kwargs: Any) -> None:  # noqa: ARG002, ANN401
         """Turns off the fan."""
+        if self._regulator.enabled:
+            return
+
         await self._coordinator.set_variable(VARIABLE_PARTY_MODE, False)
         await self._coordinator.set_variable(VARIABLE_STANDBY_MODE, False)
         await self._coordinator.set_variable(VARIABLE_OPERATING_MODE, OPERATING_MODE_MANUAL)
@@ -274,6 +293,9 @@ class EasyControlsFanDevice(FanEntity):
                 Set to None to keep the previously set value.
 
         """
+        if self._regulator.enabled:
+            return
+
         if speed is not None:
             await self._coordinator.set_variable(
                 VARIABLE_PARTY_MODE_FAN_STAGE, self.speed_to_fan_stage(speed)
@@ -286,6 +308,9 @@ class EasyControlsFanDevice(FanEntity):
 
     async def stop_party_mode(self) -> None:
         """Stops the party mode."""
+        if self._regulator.enabled:
+            return
+
         await self._coordinator.set_variable(VARIABLE_PARTY_MODE, False)
         self._schedule_variable_updates()
 
@@ -367,7 +392,8 @@ async def async_setup_entry(
     _LOGGER.info("Setting up Helios EasyControls fan device.")
 
     coordinator = get_coordinator(hass, config_entry.data[CONF_MAC])
-    fan = EasyControlsFanDevice(coordinator)
+    regulator = hass.data[DOMAIN][DATA_FAN_REGULATOR][config_entry.data[CONF_MAC]]
+    fan = EasyControlsFanDevice(coordinator, regulator)
 
     async_add_entities([fan])
 

@@ -6,13 +6,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
-from custom_components.easycontrols.const import DATA_COORDINATOR, DOMAIN
+from custom_components.easycontrols.const import DATA_COORDINATOR, DATA_FAN_REGULATOR, DOMAIN
 from custom_components.easycontrols.coordinator import (
     EasyControlsDataUpdateCoordinator,
     create_coordinator,
 )
+from custom_components.easycontrols.fan_regulator import FanRegulatorController
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ async def async_setup(
         The value indicates whether the setup succeeded.
 
     """
-    hass.data[DOMAIN] = {DATA_COORDINATOR: {}}
+    hass.data[DOMAIN] = {DATA_COORDINATOR: {}, DATA_FAN_REGULATOR: {}}
     return True
 
 
@@ -61,9 +63,23 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
         set_coordinator(hass, coordinator)
 
+    mac_address = config_entry.data[CONF_MAC]
+    regulators = hass.data[DOMAIN][DATA_FAN_REGULATOR]
+    if mac_address not in regulators:
+        humidity_store = Store(hass, 1, f"{DOMAIN}.humidity_settings.{config_entry.entry_id}")
+        settings = await humidity_store.async_load() or {}
+        regulator = FanRegulatorController(
+            hass, get_coordinator(hass, mac_address), humidity_store=humidity_store
+        )
+        regulator.configure_humidity(
+            settings.get("factor", 1.0), settings.get("initial_humidity", 52.0)
+        )
+        regulator.start()
+        regulators[mac_address] = regulator
+
     hass.async_create_task(
         hass.config_entries.async_forward_entry_setups(
-            config_entry, ("fan", "sensor", "binary_sensor")
+            config_entry, ("fan", "sensor", "binary_sensor", "switch", "number")
         )
     )
 
@@ -82,13 +98,20 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         The value indicates whether the unloading succeeded.
 
     """
-    if is_coordinator_exists(hass, config_entry.data[CONF_MAC]):
-        coordinator = get_coordinator(hass, config_entry.data[CONF_MAC])
+    mac_address = config_entry.data[CONF_MAC]
+    regulator = hass.data[DOMAIN][DATA_FAN_REGULATOR].pop(mac_address, None)
+    if regulator is not None:
+        regulator.stop()
+
+    if is_coordinator_exists(hass, mac_address):
+        coordinator = get_coordinator(hass, mac_address)
         coordinator.unload()
 
     await hass.config_entries.async_forward_entry_unload(config_entry, "fan")
     await hass.config_entries.async_forward_entry_unload(config_entry, "sensor")
     await hass.config_entries.async_forward_entry_unload(config_entry, "binary_sensor")
+    await hass.config_entries.async_forward_entry_unload(config_entry, "switch")
+    await hass.config_entries.async_forward_entry_unload(config_entry, "number")
 
     return True
 
