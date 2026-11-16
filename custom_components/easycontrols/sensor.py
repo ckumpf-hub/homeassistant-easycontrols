@@ -18,6 +18,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from custom_components.easycontrols import get_coordinator
 from custom_components.easycontrols.const import (
+    DATA_FAN_REGULATOR,
+    DOMAIN,
     ERRORS,
     INFOS,
     VARIABLE_ERRORS,
@@ -77,9 +79,79 @@ from custom_components.easycontrols.const import (
     WARNINGS,
 )
 from custom_components.easycontrols.coordinator import EasyControlsDataUpdateCoordinator
+from custom_components.easycontrols.fan_regulator import FanRegulatorController
 from custom_components.easycontrols.modbus_variable import IntModbusVariable, ModbusVariable
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class EasyControlsCorrectedHumiditySensor(SensorEntity):
+    """Expose the corrected extract-air humidity."""
+
+    def __init__(
+        self: Self,
+        coordinator: EasyControlsDataUpdateCoordinator,
+        regulator: FanRegulatorController,
+    ) -> None:
+        self.entity_description = SensorEntityDescription(
+            key="corrected_extract_air_humidity",
+            name=f"{coordinator.device_name} corrected extract air humidity",
+            icon="mdi:water-percent",
+            native_unit_of_measurement="%",
+            device_class=SensorDeviceClass.HUMIDITY,
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+        self._regulator = regulator
+        self._attr_unique_id = f"{coordinator.mac}_corrected_extract_air_humidity"
+        self._attr_should_poll = False
+        self._attr_device_info = DeviceInfo(
+            connections={(device_registry.CONNECTION_NETWORK_MAC, coordinator.mac)}
+        )
+
+    @property
+    def native_value(self: Self) -> float | None:
+        """Return corrected humidity or unknown when the reading is invalid."""
+        humidity = self._regulator.corrected_humidity
+        return None if humidity is None else round(humidity, 2)
+
+    async def async_added_to_hass(self: Self) -> None:
+        """Subscribe to humidity readings and configuration changes."""
+        await super().async_added_to_hass()
+        self.async_on_remove(self._regulator.add_humidity_listener(self.async_write_ha_state))
+
+
+class EasyControlsAdaptiveHumiditySensor(SensorEntity):
+    """Expose the regulator's adaptive humidity target."""
+
+    def __init__(
+        self: Self,
+        coordinator: EasyControlsDataUpdateCoordinator,
+        regulator: FanRegulatorController,
+    ) -> None:
+        self.entity_description = SensorEntityDescription(
+            key="adaptive_humidity_target",
+            name=f"{coordinator.device_name} adaptive humidity target",
+            icon="mdi:water-percent",
+            native_unit_of_measurement="%",
+            device_class=SensorDeviceClass.HUMIDITY,
+            state_class=SensorStateClass.MEASUREMENT,
+        )
+        self._regulator = regulator
+        self._attr_unique_id = f"{coordinator.mac}_adaptive_humidity_target"
+        self._attr_should_poll = False
+        self._attr_device_info = DeviceInfo(
+            connections={(device_registry.CONNECTION_NETWORK_MAC, coordinator.mac)}
+        )
+
+    @property
+    def native_value(self: Self) -> float:
+        """Return the adaptive humidity target as a percentage."""
+        return round(self._regulator.adaptive_humidity, 2)
+
+    async def async_added_to_hass(self: Self) -> None:
+        """Subscribe to updates from the regulator."""
+        await super().async_added_to_hass()
+        self.async_on_remove(self._regulator.add_humidity_listener(self.async_write_ha_state))
 
 
 class EasyControlsAirFlowRateSensor(SensorEntity):
@@ -435,9 +507,12 @@ async def async_setup_entry(
     _LOGGER.info("Setting up Helios EasyControls sensors.")
 
     coordinator = get_coordinator(hass, config_entry.data[CONF_MAC])
+    regulator = hass.data[DOMAIN][DATA_FAN_REGULATOR][config_entry.data[CONF_MAC]]
 
     async_add_entities(
         [
+            EasyControlsCorrectedHumiditySensor(coordinator, regulator),
+            EasyControlsAdaptiveHumiditySensor(coordinator, regulator),
             EasyControlsSensor(
                 coordinator,
                 VARIABLE_SOFTWARE_VERSION,

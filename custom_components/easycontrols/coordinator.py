@@ -59,6 +59,10 @@ from custom_components.easycontrols.const import (
     VARIABLE_EXTERNAL_VOC_8,
     VARIABLE_EXTRACT_AIR_FAN_STAGE,
     VARIABLE_EXTRACT_AIR_RPM,
+    VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_1,
+    VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_2,
+    VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_3,
+    VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_4,
     VARIABLE_FAN_STAGE,
     VARIABLE_FILTER_CHANGE,
     VARIABLE_HUMIDITY_EXTRACT_AIR,
@@ -70,6 +74,7 @@ from custom_components.easycontrols.const import (
     VARIABLE_OPERATION_HOURS_EXTRACT_AIR_FAN,
     VARIABLE_OPERATION_HOURS_PREHEATER,
     VARIABLE_OPERATION_HOURS_SUPPLY_AIR_FAN,
+    VARIABLE_PASSIVE_COOLING,
     VARIABLE_PARTY_MODE,
     VARIABLE_PARTY_MODE_DURATION,
     VARIABLE_PARTY_MODE_FAN_STAGE,
@@ -84,6 +89,10 @@ from custom_components.easycontrols.const import (
     VARIABLE_STANDBY_MODE_REMAINING_TIME,
     VARIABLE_SUPPLY_AIR_FAN_STAGE,
     VARIABLE_SUPPLY_AIR_RPM,
+    VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_1,
+    VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_2,
+    VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_3,
+    VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_4,
     VARIABLE_TEMPERATURE_EXTRACT_AIR,
     VARIABLE_TEMPERATURE_OUTGOING_AIR,
     VARIABLE_TEMPERATURE_OUTSIDE_AIR,
@@ -193,6 +202,7 @@ class EasyControlsDataUpdateCoordinator:
                 VARIABLE_TEMPERATURE_EXTRACT_AIR,
                 VARIABLE_SUPPLY_AIR_RPM,
                 VARIABLE_SUPPLY_AIR_FAN_STAGE,
+                VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_2,
                 VARIABLE_STANDBY_MODE,
                 VARIABLE_STANDBY_MODE_FAN_STAGE,
                 VARIABLE_STANDBY_MODE_REMAINING_TIME,
@@ -200,6 +210,7 @@ class EasyControlsDataUpdateCoordinator:
                 VARIABLE_PERCENTAGE_PREHEATER,
                 VARIABLE_PERCENTAGE_FAN_SPEED,
                 VARIABLE_PERCENTAGE_AFTERHEATER,
+                VARIABLE_PASSIVE_COOLING,
                 VARIABLE_PARTY_MODE_REMAINING_TIME,
                 VARIABLE_PARTY_MODE_FAN_STAGE,
                 VARIABLE_PARTY_MODE_DURATION,
@@ -528,6 +539,42 @@ class EasyControlsDataUpdateCoordinator:
         async with self._lock:
             _LOGGER.debug("Setting %s to %s.", variable.name, value)
             return await self._eazyctrl.set_variable(variable.name, value, variable.set_converter)
+
+    async def set_fan_stage_voltages(
+        self: Self, fan_stage: int, supply_air_voltage: float
+    ) -> bool:
+        """Set voltages for the selected fan stage from a supply-air setpoint."""
+        voltage_variables = {
+            1: (VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_1, VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_1),
+            2: (VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_2, VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_2),
+            3: (VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_3, VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_3),
+            4: (VARIABLE_EXTRACT_AIR_VOLTAGE_STAGE_4, VARIABLE_SUPPLY_AIR_VOLTAGE_STAGE_4),
+        }
+        if fan_stage not in voltage_variables:
+            raise ValueError("fan_stage must be between 1 and 4")
+
+        extract_variable, supply_variable = voltage_variables[fan_stage]
+        supply_air_voltage = round(min(max(supply_air_voltage, 0.0), 10.0), 1)
+        extract_air_voltage = round(
+            min(supply_air_voltage / 1.2, 10.0 / 1.2),
+            1,
+        )
+
+        async with self._lock:
+            _LOGGER.debug(
+                "Setting fan stage %s voltages: extract air %s V, supply air %s V.",
+                fan_stage,
+                extract_air_voltage,
+                supply_air_voltage,
+            )
+            extract_result = await self._eazyctrl.set_variable(
+                extract_variable.name, extract_air_voltage, extract_variable.set_converter
+            )
+            supply_result = await self._eazyctrl.set_variable(
+                supply_variable.name, supply_air_voltage, supply_variable.set_converter
+            )
+
+        return extract_result and supply_result
 
 
 async def create_coordinator(
